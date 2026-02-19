@@ -29,6 +29,9 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         filecreatedialog.h filecreatedialog.cpp
         filetab.h filetab.cpp
         codeeditor.h codeeditor.cpp
+        resources.qrc
+        style.qss
+        style.qss
     )
     target_include_directories(untitled1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # Define target properties for Android with Qt 6 as:

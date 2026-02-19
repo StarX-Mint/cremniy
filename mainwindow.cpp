@@ -14,6 +14,11 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    QFile file(":/style.qss");
+    file.open(QFile::ReadOnly);
+    QString styleSheet = QLatin1String(file.readAll());
+    qApp->setStyleSheet(styleSheet);
+
     ui->splitter->setSizes({200, 1000});
     ui->splitter->setCollapsible(0, false);
     ui->splitter->setCollapsible(1, false);
@@ -54,29 +59,6 @@ MainWindow::MainWindow(QWidget *parent)
     while (ui->tabWidget->count() > 0) {
         ui->tabWidget->removeTab(0);
     }
-
-
-
-    ui->tabWidget->tabBar()->setStyleSheet(R"(
-    QTabBar::tab {
-        border-radius: 0px;
-        border: 1px solid #333;
-        padding: 3px 6px;
-        background: #1e1e1e;
-        color: #ccc;
-
-        font-size: 12px;
-    }
-
-    QTabBar::tab:selected {
-        background: #252526;
-        border-bottom: 2px solid #007acc;
-    }
-
-    QTabBar::tab:hover {
-        background: #2a2d2e;
-    }
-    )");
 
     ui->tabWidget->setTabsClosable(true);
 
