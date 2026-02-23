@@ -14,7 +14,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(QString ProjectPath, QJsonObject ProjectInfo, QWidget *parent = nullptr);
     ~MainWindow() override;
 
 private slots:
@@ -28,6 +28,7 @@ private slots:
 
 private:
     Ui::MainWindow *ui;
+    void SaveProjectInCache(const QString project_path);
     void openDirectory(const QString &path);
 };
 #endif // MAINWINDOW_H

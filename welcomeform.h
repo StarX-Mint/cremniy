@@ -1,0 +1,50 @@
+#ifndef WELCOMEFORM_H
+#define WELCOMEFORM_H
+
+#include "clickablelineedit.h"
+#include <QWidget>
+#include <qcombobox.h>
+#include <qlabel.h>
+#include <qlineedit.h>
+#include <qlistview.h>
+#include <qstackedwidget.h>
+
+namespace Ui {
+class WelcomeForm;
+}
+
+class WelcomeForm : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit WelcomeForm(QWidget *parent = nullptr);
+    ~WelcomeForm();
+
+
+private:
+    Ui::WelcomeForm *ui;
+    QStackedWidget *stack;
+    QPushButton *open_recent_proj_btn;
+    QLabel *proj_name_label;
+    QLineEdit *proj_name_lineEdit;
+    QComboBox *language_comboBox;
+    QLabel *language_label;
+    QLabel *info_label;
+    QLabel *path_label;
+    ClickableLineEdit *path_lineEdit;
+    QListView *history_project_list;
+    void L2CreateProject(QString name, QString path, QString language);
+    void SetProjectHistoryList();
+
+private slots:
+    void SelectProjectInList();
+    void OpenRecentProjectHandler();
+    void OpenProjectHandler();
+    void CreateProjectHandler();
+    void DeleteProjectHandler();
+    void L2BackButton();
+    void L2CreateButton();
+};
+
+#endif // WELCOMEFORM_H

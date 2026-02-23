@@ -41,6 +41,10 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         codeeditor/CMakeLists.txt
         filestabwidget.h filestabwidget.cpp
         filetab.h filetab.cpp
+
+        welcomeform.h welcomeform.cpp welcomeform.ui
+        clickablelineedit.h clickablelineedit.cpp
+
     )
     target_include_directories(untitled1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # Define target properties for Android with Qt 6 as:

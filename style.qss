@@ -20,16 +20,46 @@ QPushButton:hover {
 }
 
 QPushButton:pressed {
-    background-color: #0a101a;
-    border: 1px solid #00aaff;
+    background-color: #162033;
+    border: 2px solid #2c4c7c;
+    font-weight: bold;
+}
+
+QComboBox {
+    background-color: #262626;
+    border: 1px solid #1f1f1f;
+    padding: 2px;
+}
+
+QComboBox:hover {
+    background-color: #162033;
+    border: 1px solid #2c4c7c;
+}
+
+QComboBox::drop-down {
+    border: 0px;           /* убираем рамку */
+    width: 0px;             /* убираем сам элемент */
+}
+
+QComboBox::down-arrow {
+    image: none;            /* убираем стрелку */
 }
 
 /* Поля ввода */
 QLineEdit, QTextEdit, QPlainTextEdit {
-    background-color: #1f1f1f;
-    border: 1px solid #262626;
+    background-color: #262626;
+    border: 1px solid #1f1f1f;
+    selection-background-color: #333333;
+    padding: 2px;
+}
 
-    selection-background-color: #004466;
+QTextEdit {
+    background-color: #1f1f1f;
+}
+
+QLineEdit:hover {
+    background-color: #162033;
+    border: 1px solid #2c4c7c;
 }
 
 /* Списки */
@@ -95,7 +125,7 @@ QTabWidget::pane {
 }
 
 QTreeView::item:selected {
-    background-color: #444444;
+    background-color: #262626;
     color: white;
 }
 
@@ -115,15 +145,14 @@ QMenuBar::item:selected {      /* выделение при клике или н
 }
 
 QMenuBar::item:hover {         /* hover мышкой */
-    background-color: #333333;
+    background-color: #262626;
 }
 
 QMenu {
-    border: 1px solid #000000;
+    border: 1px solid #111111;
 }
 
 QMenu::item:selected {
     background: #333333;
 }
-
 

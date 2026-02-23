@@ -1,4 +1,4 @@
-#include "mainwindow.h"
+#include "welcomeform.h"
 
 #include <QApplication>
 
@@ -6,10 +6,7 @@ int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
     a.setWindowIcon(QIcon(":/icon.png"));
-    MainWindow w;
-
-
-
-    w.show();
+    WelcomeForm wf;
+    wf.show();
     return QCoreApplication::exec();
 }

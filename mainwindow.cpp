@@ -1,21 +1,21 @@
 #include "mainwindow.h"
-#include "QCodeEditor.hpp"
-#include "filetab.h"
 #include "filetreeview.h"
 #include "filecreatedialog.h"
 #include "./ui_mainwindow.h"
-
 #include "QFileSystemModel"
-
 #include "QMessageBox"
-#include "tooltab.h"
+#include <qjsondocument.h>
+#include <qjsonobject.h>
+#include <QStandardPaths>
 
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(QString ProjectPath, QJsonObject ProjectInfo, QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
 {
 
     ui->setupUi(this);
+
+    SaveProjectInCache(ProjectPath);
 
     QFile file(":/style.qss");
     file.open(QFile::ReadOnly);
@@ -34,16 +34,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     QFileSystemModel *model = new QFileSystemModel(this);
 
-    // путь, который нужно показать
-    QString path = "/home/igmunv/";
-
-    model->setRootPath(path);
+    model->setRootPath(ProjectPath);
 
     model->setReadOnly(false);
     ui->treeView->setModel(model);
 
     // ограничиваем отображение только этой директории
-    ui->treeView->setRootIndex(model->index(path));
+    ui->treeView->setRootIndex(model->index(ProjectPath));
     // model->setIconProvider(new IconProvider());
 
     ui->treeView->setColumnHidden(1, true);
@@ -83,6 +80,28 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+
+void MainWindow::SaveProjectInCache(const QString project_path){
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir(dataDir).mkpath(".");
+    QFile history_file(dataDir+"/"+"history_open_projects.dat");
+    QStringList lines;
+    if (history_file.open(QIODevice::ReadOnly)) {
+        QByteArray data = history_file.readAll();
+        QString text = QString::fromUtf8(data);
+        lines = text.split(QRegularExpression("[\r\n]+"), Qt::SkipEmptyParts);
+        history_file.close();
+    }
+    lines.removeAll(project_path);
+    lines.prepend(project_path);
+    while (lines.size() > 15)
+        lines.removeLast();
+    if (!history_file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+    QTextStream out(&history_file);
+    for (const QString& l : lines)
+        out << l << "\n";
+    history_file.close();
 }
 
 void MainWindow::onSaveFile()
