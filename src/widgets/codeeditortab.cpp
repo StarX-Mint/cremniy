@@ -14,6 +14,7 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
     QString ext = fileInfo.suffix();
 
     m_codeEditorWidget = new QCodeEditor(ext, this);
+    m_codeEditorWidget->setTabReplace(false);
 
     QTextOption opt = m_codeEditorWidget->document()->defaultTextOption();
     opt.setTabStopDistance(20);
