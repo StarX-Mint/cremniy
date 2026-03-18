@@ -5,14 +5,21 @@
 #include <qlabel.h>
 #include <qpushbutton.h>
 #include <qstackedlayout.h>
+#include "filemanager.h"
 #include "globalwidgetsmanager.h"
+#include "utils.h"
 
 CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
-    : QWidget{parent}
+    : ToolTab{parent}
 {
 
+    // - - Init variables - -
+
+    m_fileContext = new FileContext(path);
     QFileInfo fileInfo(path);
     QString ext = fileInfo.suffix();
+
+    // - - Create "Code Editor" Page - -
 
     m_codeEditorWidget = new QCodeEditor(ext, this);
     m_codeEditorWidget->setTabReplace(false);
@@ -23,6 +30,8 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
 
     m_codeEditorWidget->document()->markContentsDirty(0, m_codeEditorWidget->document()->characterCount());
     m_codeEditorWidget->viewport()->update();
+
+    // - - Create "Binary File Detected" Page - -
 
     m_overlayWidget = new QWidget(this);
 
@@ -42,15 +51,13 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
     QPushButton* openHexBtn = new QPushButton("Open in Hex Viewer");
     QPushButton* anywayOpenBtn = new QPushButton("Open anyway");
 
-    openHexBtn->setStyleSheet(""
-                              "QPushButton { border: 1px solid #2c7c32; } "
-                              "QPushButton:hover { background-color: #163318; border: 1px solid #2c7c32; } "
-                              "QPushButton:pressed { background-color: #163318; border: 2px solid #2c7c32; font-weight: bold; } "
-                              );
+    openHexBtn->setProperty("state", "green");
 
     btnLayout->addWidget(openHexBtn);
     btnLayout->addWidget(anywayOpenBtn);
     overlayLayout->addLayout(btnLayout);
+
+    // - - Create and Init Stacked Layout Widget - -
 
     auto stack = new QStackedLayout;
     stack->setStackingMode(QStackedLayout::StackAll);
@@ -59,8 +66,11 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
 
     m_overlayWidget->hide();
 
-    setLayout(stack);
+    this->setLayout(stack);
 
+    // - - Connects - -
+
+    // Trigger: Menu Bar: View->wordWrap - setWordWrapMode
     connect(GlobalWidgetsManager::instance().get_IDEWindow_menuBar_view_wordWrap(),
             &QAction::changed,
             this, [this]{
@@ -70,15 +80,18 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
                     m_codeEditorWidget->setWordWrapMode(QTextOption::NoWrap);
             });
 
+    // Clicked: HEX Tab Open Button
     connect(openHexBtn, &QPushButton::clicked, this, [this]{
-        emit setHexViewTab();
+        emit switchHexViewTab();
     });
 
+    // Clicked: Open File Anyway Button
     connect(anywayOpenBtn, &QPushButton::clicked, this, [this]{
         forceSetData = true;
-        emit askData();
+        this->setTabData();
     });
 
+    // modificationChanged: signal modifyData
     connect(m_codeEditorWidget->document(),
             &QTextDocument::modificationChanged,
             this,
@@ -87,13 +100,14 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
                     emit modifyData(true);
             });
 
+    // ContentsChanged: if new hash == old hash: dataEqual, else: signal modifyData
     connect(m_codeEditorWidget->document(),
             &QTextDocument::contentsChanged,
             this,
             [this](){
                 QByteArray data = m_codeEditorWidget->getBData();
                 uint newDataHash = qHash(data, 0);
-                if (dataHash == newDataHash) {
+                if (m_dataHash == newDataHash) {
                     emit dataEqual();
                 }
                 else{
@@ -102,4 +116,47 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
                 }
             });
 
+    // Set Data From File
+    this->setTabData();
+
+}
+
+// - - override functions - -
+
+// - public slots -
+
+void CodeEditorTab::setTabData(){
+
+    qDebug() << "CodeEditorTab: setTabData";
+
+    QByteArray data = FileManager::openFile(m_fileContext);
+
+    if (isBinary(data) && !forceSetData){
+        m_codeEditorWidget->hide();
+        m_overlayWidget->show();
+    }
+    else{
+        m_dataHash = qHash(data, 0);
+        m_codeEditorWidget->show();
+        m_overlayWidget->hide();
+        m_codeEditorWidget->setBData(data);
+        forceSetData = false;
+    }
+
+}
+
+void CodeEditorTab::saveTabData() {
+    qDebug() << "CodeEditorTab: saveTabData";
+
+    QByteArray data = m_codeEditorWidget->getBData();
+    uint newDataHash = qHash(data, 0);
+    if (newDataHash == m_dataHash) return;
+    m_dataHash = newDataHash;
+
+    FileManager::saveFile(m_fileContext, &data);
+
+    m_codeEditorWidget->document()->setModified(false);
+
+    emit dataEqual();
+    emit refreshDataAllTabsSignal();
 }

@@ -6,53 +6,48 @@
 #include <QWidget>
 #include <qfileinfo.h>
 #include <qlabel.h>
-#include "utils.h"
 
-class CodeEditorTab : public QWidget, public ToolTab
+class CodeEditorTab : public ToolTab
 {
     Q_OBJECT
 
 private:
+
+    /**
+     * @brief Виджет редактора кода
+    */
     QCodeEditor* m_codeEditorWidget;
+
+    /**
+     * @brief Главный виджет страницы "Binary File Detected"
+    */
     QWidget* m_overlayWidget;
+
+    /**
+     * @brief Флаг принудительной установки данных
+     *
+     * Используется при нажатии пользователем на кнопку "Open Anyway" на странице "Binary File Detected"
+    */
     bool forceSetData = false;
-    uint dataHash = 0;
 
 public:
     explicit CodeEditorTab(QWidget *parent, QString path);
 
-    void saveToFile(QString path) override {
-        QByteArray data = m_codeEditorWidget->getBData();
-        uint newDataHash = qHash(data, 0);
-        if (newDataHash == dataHash) return;
-        dataHash = newDataHash;
-        QFile f(path);
-        if (!f.open(QFile::WriteOnly)) return;
-        f.write(data);
-        f.close();
-        m_codeEditorWidget->document()->setModified(false);
-    };
-
-    void setTabData(QByteArray &data) override {
-
-        if (isBinary(data) && !forceSetData){
-            m_codeEditorWidget->hide();
-            m_overlayWidget->show();
-        }
-        else{
-            dataHash = qHash(data, 0);
-            m_codeEditorWidget->show();
-            m_overlayWidget->hide();
-            m_codeEditorWidget->setBData(data);
-            forceSetData = false;
-        }
-    };
-
 signals:
-    void modifyData(bool modified);
-    void dataEqual();
-    void askData();
-    void setHexViewTab();
+
+    /**
+     * @brief Переключить на вкладку "Hex View"
+     *
+     * Используется при нажатии на кнопку "Open in HexView" на странице "Binary File Detected"
+    */
+    void switchHexViewTab();
+
+public slots:
+
+    // From Parrent Class: ToolTab
+    void setTabData() override;
+    void saveTabData() override;
+
 };
 
 #endif // CODEEDITORTAB_H

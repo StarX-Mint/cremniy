@@ -26,9 +26,11 @@ static constexpr int NUM_COLS     = 4;
 
 // ─────────────────────────────────────────────────────────────────────────────
 DisassemblerTab::DisassemblerTab(QWidget *parent, QString path)
-    : QWidget{parent}
-    , m_filePath(path)
+    : ToolTab{parent}
 {
+
+    m_fileContext = new FileContext(path);
+
     setupUi();
 
     m_thread = new QThread(this);
@@ -50,6 +52,9 @@ DisassemblerTab::DisassemblerTab(QWidget *parent, QString path)
             this,     &DisassemblerTab::onLogLine,         Qt::QueuedConnection);
 
     m_thread->start();
+
+    // Set Data From File
+    this->setTabData();
 }
 
 DisassemblerTab::~DisassemblerTab()
@@ -59,7 +64,7 @@ DisassemblerTab::~DisassemblerTab()
     m_thread->wait(2000);
 }
 
-void DisassemblerTab::setTabData(QByteArray &)
+void DisassemblerTab::setTabData()
 {
     startDisassembly();
 }
@@ -254,7 +259,7 @@ void DisassemblerTab::setupUi()
 void DisassemblerTab::startDisassembly()
 {
     if (m_running) return;
-    if (m_filePath.isEmpty()) { showPlaceholder(tr("No file path set")); return; }
+    if (m_fileContext->filePath().isEmpty()) { showPlaceholder(tr("No file path set")); return; }
 
     m_sections.clear();
     m_table->setRowCount(0);
@@ -280,7 +285,7 @@ void DisassemblerTab::startDisassembly()
     setRunningState(true);
     showPlaceholder(tr("Disassembling…"));
 
-    emit requestDisassembly(m_filePath, {});
+    emit requestDisassembly(m_fileContext->filePath(), {});
 }
 
 void DisassemblerTab::cancelDisassembly()

@@ -16,7 +16,7 @@ class QLineEdit;
 class QStackedWidget;
 class QSplitter;
 
-class DisassemblerTab : public QWidget, public ToolTab
+class DisassemblerTab : public ToolTab
 {
     Q_OBJECT
 
@@ -24,14 +24,15 @@ public:
     explicit DisassemblerTab(QWidget *parent, QString path);
     ~DisassemblerTab();
 
-    void saveToFile(QString path) override {}
-    void setTabData(QByteArray &data) override;
-
 signals:
-    void modifyData(bool modified);
     void requestDisassembly(const QString &filePath, const QString &arch);
 
+public slots:
+    void setTabData() override;
+    void saveTabData() override {};
+
 private slots:
+
     void onSectionFound(const DisasmSection &section);
     void onWorkerFinished();
     void onWorkerError(const QString &msg);
@@ -49,8 +50,6 @@ private:
     void populateSectionCombo();
     void applyFilter();
     void appendLog(const QString &line);
-
-    QString m_filePath;
 
     QThread            *m_thread  = nullptr;
     DisassemblerWorker *m_worker  = nullptr;

@@ -4,9 +4,8 @@
 #include <qdir.h>
 #include <qevent.h>
 
-FileTab::FileTab(FilesTabWidget *ftparent, QString path, QWidget* parent)
+FileTab::FileTab(QWidget* parent, QString path)
     : QWidget(parent),
-    m_filesTabWidget(ftparent),
     filePath(path)
 {
     QVBoxLayout *vlayout = new QVBoxLayout(this);
@@ -16,23 +15,16 @@ FileTab::FileTab(FilesTabWidget *ftparent, QString path, QWidget* parent)
     vlayout->setContentsMargins(0,0,0,0);
     this->setLayout(vlayout);
 
-    connect(m_tooltabWidget, &ToolTabWidget::askData,
-            this, &FileTab::giveData);
+    // - - Connects - -
+    connect(m_tooltabWidget, &ToolTabWidget::removeStarSignal, this, &FileTab::removeStar);
+    connect(m_tooltabWidget, &ToolTabWidget::setupStarSignal, this, &FileTab::setupStar);
+
 }
 
-void FileTab::openFile(int index, int excluded_index){
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) return;
-    QByteArray data = file.readAll();
-    file.close();
-    m_tooltabWidget->setDataInTabs(data, index, excluded_index);
+void FileTab::removeStar(){
+    emit removeStarSignal(this);
 }
 
-void FileTab::saveFile(){
-    int excluded_index = m_tooltabWidget->saveToFileCurrentTab(filePath);
-    openFile(-1,excluded_index);
-}
-
-void FileTab::giveData(int index){
-    openFile(index);
+void FileTab::setupStar(){
+    emit setupStarSignal(this);
 }

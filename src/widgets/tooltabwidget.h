@@ -31,13 +31,15 @@ private:
     DisassemblerTab* m_disassemblerTab;
 
 public slots:
-    void onTabModified(bool modified);
-    void giveData();
     void setHexViewTab();
+    void saveCurrentTabData();
+
     void removeStar();
+    void setupStar(bool modified);
 
 signals:
-    void askData(int index);
+    void removeStarSignal();
+    void setupStarSignal();
 
 };
 

@@ -6,30 +6,31 @@
 #include <QWidget>
 #include <qfileinfo.h>
 
-class HexViewTab : public QWidget, public ToolTab
+class HexViewTab : public ToolTab
 {
     Q_OBJECT
 
 private:
+
+    /**
+     * @brief Виджет HexView
+    */
     QHexView* m_hexViewWidget;
+
+    /**
+     * @brief Создаёт страницу для вкладки формата
+    */
     QWidget* createPage();
 
 public:
     explicit HexViewTab(QWidget *parent, QString path);
 
-    void saveToFile(QString path) override {
-        QFile f(path);
-        if (!f.open(QFile::WriteOnly)) return;
-        f.write(m_hexViewWidget->getBData());
-        f.close();
-    };
+public slots:
 
-    void setTabData(QByteArray &data) override {
-        m_hexViewWidget->setBData(data);
-    };
+    // From Parrent Class: ToolTab
+    void setTabData() override;
+    void saveTabData() override;
 
-signals:
-    void modifyData(bool modified);
 };
 
 #endif // HEXVIEWTAB_H

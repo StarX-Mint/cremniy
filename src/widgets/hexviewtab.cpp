@@ -6,10 +6,14 @@
 #include <qtabwidget.h>
 #include <QListWidget>
 #include <QTableWidget>
+#include "filemanager.h"
 
 HexViewTab::HexViewTab(QWidget *parent, QString path)
-    : QWidget{parent}
+    : ToolTab{parent}
 {
+    // - - Init variables - -
+
+    m_fileContext = new FileContext(path);
 
     // - - Tab Widgets - -
 
@@ -37,9 +41,8 @@ HexViewTab::HexViewTab(QWidget *parent, QString path)
 
     // - - Create Pages - -
 
-    // crash fix
+   // RAW page
     m_hexViewWidget = new QHexView(this);
-    
     auto pageRaw = createPage();
     pageRaw->layout()->addWidget(m_hexViewWidget);
 
@@ -71,11 +74,23 @@ HexViewTab::HexViewTab(QWidget *parent, QString path)
 
     // hexViewWidget: data change
     connect(m_hexViewWidget->hexDocument(),
-            &QHexDocument::dataChanged,
+            &QHexDocument::changed,
             this,
-            [this](const QByteArray&, quint64, QHexChangeReason){
-                emit modifyData(true);
+            [this](){
+
+                QByteArray data = m_hexViewWidget->getBData();
+                uint newDataHash = qHash(data, 0);
+                if (m_dataHash == newDataHash) {
+                    emit dataEqual();
+                }
+                else{
+                    if (!m_hexViewWidget->m_ignoreModification)
+                        emit modifyData(true);
+                }
             });
+
+    // Set Data From File
+    this->setTabData();
 }
 
 // Create default page
@@ -85,4 +100,33 @@ QWidget* HexViewTab::createPage(){
     pageWidgetLayout->setContentsMargins(0,0,0,0);
     pageWidget->setLayout(pageWidgetLayout);
     return pageWidget;
+}
+
+
+// - - override functions - -
+
+// - public slots -
+
+void HexViewTab::setTabData(){
+    qDebug() << "HexViewTab: setTabData()";
+
+    QByteArray data = FileManager::openFile(m_fileContext);
+
+    m_dataHash = qHash(data, 0);
+    m_hexViewWidget->setBData(data);
+    emit dataEqual();
+};
+
+void HexViewTab::saveTabData() {
+    qDebug() << "HexViewTab: saveTabData";
+
+    QByteArray data = m_hexViewWidget->getBData();
+    uint newDataHash = qHash(data, 0);
+    if (newDataHash == m_dataHash) return;
+    m_dataHash = newDataHash;
+
+    FileManager::saveFile(m_fileContext, &data);
+
+    emit dataEqual();
+    emit refreshDataAllTabsSignal();
 }
