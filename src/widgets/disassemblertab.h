@@ -25,7 +25,6 @@ public:
     ~DisassemblerTab();
 
 signals:
-    void modifyData(bool modified);
     void requestDisassembly(const QString &filePath, const QString &arch);
 
 public slots:

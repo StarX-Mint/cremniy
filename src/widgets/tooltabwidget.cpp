@@ -41,7 +41,7 @@ ToolTabWidget::ToolTabWidget(QWidget *parent, QString path)
     // Code Editor Tab
     connect(m_codeEditorTab, &CodeEditorTab::modifyData, this, &ToolTabWidget::setupStar);
     connect(m_codeEditorTab, &CodeEditorTab::dataEqual, this, &ToolTabWidget::removeStar);
-    connect(m_codeEditorTab, &CodeEditorTab::setHexViewTab, this, &ToolTabWidget::setHexViewTab); // when "Open in HexView" button clicked
+    connect(m_codeEditorTab, &CodeEditorTab::switchHexViewTab, this, &ToolTabWidget::setHexViewTab); // when "Open in HexView" button clicked
     connect(m_codeEditorTab, &CodeEditorTab::refreshDataAllTabsSignal, m_hexViewTab, &HexViewTab::setTabData);
     connect(m_codeEditorTab, &CodeEditorTab::refreshDataAllTabsSignal, m_disassemblerTab, &DisassemblerTab::setTabData);
 

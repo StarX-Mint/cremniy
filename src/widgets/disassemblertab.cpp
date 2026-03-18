@@ -53,6 +53,7 @@ DisassemblerTab::DisassemblerTab(QWidget *parent, QString path)
 
     m_thread->start();
 
+    // Set Data From File
     this->setTabData();
 }
 

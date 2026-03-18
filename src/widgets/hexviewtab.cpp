@@ -11,6 +11,7 @@
 HexViewTab::HexViewTab(QWidget *parent, QString path)
     : ToolTab{parent}
 {
+    // - - Init variables - -
 
     m_fileContext = new FileContext(path);
 
@@ -40,9 +41,8 @@ HexViewTab::HexViewTab(QWidget *parent, QString path)
 
     // - - Create Pages - -
 
-    // crash fix
+   // RAW page
     m_hexViewWidget = new QHexView(this);
-    
     auto pageRaw = createPage();
     pageRaw->layout()->addWidget(m_hexViewWidget);
 
@@ -89,7 +89,7 @@ HexViewTab::HexViewTab(QWidget *parent, QString path)
                 }
             });
 
-
+    // Set Data From File
     this->setTabData();
 }
 

@@ -12,21 +12,39 @@ class CodeEditorTab : public ToolTab
     Q_OBJECT
 
 private:
+
+    /**
+     * @brief Виджет редактора кода
+    */
     QCodeEditor* m_codeEditorWidget;
+
+    /**
+     * @brief Главный виджет страницы "Binary File Detected"
+    */
     QWidget* m_overlayWidget;
+
+    /**
+     * @brief Флаг принудительной установки данных
+     *
+     * Используется при нажатии пользователем на кнопку "Open Anyway" на странице "Binary File Detected"
+    */
     bool forceSetData = false;
 
 public:
     explicit CodeEditorTab(QWidget *parent, QString path);
 
 signals:
-    void modifyData(bool modified);
-    void dataEqual();
-    void askData();
-    void setHexViewTab();
+
+    /**
+     * @brief Переключить на вкладку "Hex View"
+     *
+     * Используется при нажатии на кнопку "Open in HexView" на странице "Binary File Detected"
+    */
+    void switchHexViewTab();
 
 public slots:
 
+    // From Parrent Class: ToolTab
     void setTabData() override;
     void saveTabData() override;
 

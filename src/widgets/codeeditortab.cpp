@@ -12,9 +12,14 @@
 CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
     : ToolTab{parent}
 {
+
+    // - - Init variables - -
+
     m_fileContext = new FileContext(path);
     QFileInfo fileInfo(path);
     QString ext = fileInfo.suffix();
+
+    // - - Create "Code Editor" Page - -
 
     m_codeEditorWidget = new QCodeEditor(ext, this);
     m_codeEditorWidget->setTabReplace(false);
@@ -25,6 +30,8 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
 
     m_codeEditorWidget->document()->markContentsDirty(0, m_codeEditorWidget->document()->characterCount());
     m_codeEditorWidget->viewport()->update();
+
+    // - - Create "Binary File Detected" Page - -
 
     m_overlayWidget = new QWidget(this);
 
@@ -50,6 +57,8 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
     btnLayout->addWidget(anywayOpenBtn);
     overlayLayout->addLayout(btnLayout);
 
+    // - - Create and Init Stacked Layout Widget - -
+
     auto stack = new QStackedLayout;
     stack->setStackingMode(QStackedLayout::StackAll);
     stack->addWidget(m_codeEditorWidget);
@@ -57,7 +66,7 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
 
     m_overlayWidget->hide();
 
-    setLayout(stack);
+    this->setLayout(stack);
 
     // - - Connects - -
 
@@ -73,13 +82,13 @@ CodeEditorTab::CodeEditorTab(QWidget *parent, QString path)
 
     // Clicked: HEX Tab Open Button
     connect(openHexBtn, &QPushButton::clicked, this, [this]{
-        emit setHexViewTab();
+        emit switchHexViewTab();
     });
 
     // Clicked: Open File Anyway Button
     connect(anywayOpenBtn, &QPushButton::clicked, this, [this]{
         forceSetData = true;
-        emit askData();
+        this->setTabData();
     });
 
     // modificationChanged: signal modifyData
