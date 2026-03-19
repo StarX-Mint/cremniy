@@ -129,7 +129,6 @@ WelcomeForm::WelcomeForm(QWidget *parent)
 
 WelcomeForm::~WelcomeForm()
 {
-    delete ui;
 }
 
 void WelcomeForm::SelectProjectInList(){

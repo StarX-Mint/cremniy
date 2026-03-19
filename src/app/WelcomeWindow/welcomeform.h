@@ -9,10 +9,6 @@
 #include <qlistview.h>
 #include <qstackedwidget.h>
 
-namespace Ui {
-class WelcomeForm;
-}
-
 class WelcomeForm : public QWidget
 {
     Q_OBJECT
@@ -23,7 +19,6 @@ public:
 
 
 private:
-    Ui::WelcomeForm *ui;
     QStackedWidget *stack;
     QPushButton *open_recent_proj_btn;
     QLabel *proj_name_label;

@@ -3,26 +3,233 @@
 
 #include <QBoxLayout>
 #include <QComboBox>
-#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QInputDialog>
+#include <QMenu>
+#include <QMessageBox>
+#include <QClipboard>
+#include <QListWidget>
+#include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
-#include <QTableWidget>
-#include <QTableWidgetItem>
 #include <QThread>
 #include <QFont>
 #include <QColor>
 #include <QDateTime>
+#include <QFileDialog>
+#include <QStandardPaths>
+#include <QTimer>
 
-static constexpr int COL_ADDR     = 0;
-static constexpr int COL_BYTES    = 1;
-static constexpr int COL_MNEMONIC = 2;
-static constexpr int COL_OPERANDS = 3;
-static constexpr int NUM_COLS     = 4;
+#include <QGuiApplication>
+#include <QClipboard>
+
+#include "utils/appsettings.h"
+#include "utils/globalwidgetsmanager.h"
+#include "widgets/disasm/disasmtexthighlighter.h"
+
+static QString normalizeBytes(const QString &bytes)
+{
+    QString s = bytes;
+    s.remove(' ');
+    s.remove('\t');
+    s.remove('\n');
+    s.remove('\r');
+    return s.trimmed();
+}
+
+static bool parseHexU64(const QString &s, quint64 *out)
+{
+    if (!out) return false;
+    QString t = s.trimmed();
+    if (t.startsWith("0x", Qt::CaseInsensitive)) t = t.mid(2);
+    bool ok = false;
+    const quint64 v = t.toULongLong(&ok, 16);
+    if (!ok) return false;
+    *out = v;
+    return true;
+}
+
+static QByteArray bytesToArray(const QString &hex, bool *okOut = nullptr)
+{
+    QString s = normalizeBytes(hex);
+    if (s.startsWith("0x", Qt::CaseInsensitive)) s = s.mid(2);
+    if (s.size() % 2 != 0) { if (okOut) *okOut = false; return {}; }
+    QByteArray out;
+    out.reserve(s.size() / 2);
+    for (int i = 0; i < s.size(); i += 2) {
+        bool ok = false;
+        const int b = s.mid(i, 2).toInt(&ok, 16);
+        if (!ok) { if (okOut) *okOut = false; return {}; }
+        out.append(static_cast<char>(b & 0xFF));
+    }
+    if (okOut) *okOut = true;
+    return out;
+}
+
+bool DisassemblerTab::tryResolveStringRefAddr(const LineInfo &li, quint64 *outAddr) const
+{
+    if (!outAddr) return false;
+    *outAddr = 0;
+    if (m_stringByAddr.isEmpty()) return false;
+
+    // Direct absolute address in operands.
+    {
+        static const QRegularExpression reHex(R"((0x[0-9a-fA-F]+))");
+        auto it = reHex.globalMatch(li.operands);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            quint64 addr = 0;
+            if (!parseHexU64(m.captured(1), &addr))
+                continue;
+            if (m_stringByAddr.contains(addr)) {
+                *outAddr = addr;
+                return true;
+            }
+        }
+    }
+
+    // RIP-relative (AT&T): disp(%rip)
+    {
+        static const QRegularExpression reRip(R"(([+-]?(?:0x[0-9a-fA-F]+|\d+))\s*\(%rip\))",
+                                            QRegularExpression::CaseInsensitiveOption);
+        const auto m = reRip.match(li.operands);
+        if (!m.hasMatch()) return false;
+
+        quint64 insn = 0;
+        if (!parseHexU64(li.address, &insn)) return false;
+        const QString b = normalizeBytes(li.bytes);
+        const quint64 len = static_cast<quint64>(b.size() / 2);
+
+        const QString dispStr = m.captured(1).trimmed();
+        bool okDisp = false;
+        qlonglong disp = 0;
+        QString d = dispStr;
+        if (d.startsWith("+")) d = d.mid(1);
+        if (d.startsWith("-")) {
+            QString mag = d.mid(1);
+            qulonglong u = 0;
+            if (mag.startsWith("0x", Qt::CaseInsensitive))
+                u = mag.mid(2).toULongLong(&okDisp, 16);
+            else
+                u = mag.toULongLong(&okDisp, 10);
+            if (okDisp) disp = -static_cast<qlonglong>(u);
+        } else {
+            qulonglong u = 0;
+            if (d.startsWith("0x", Qt::CaseInsensitive))
+                u = d.mid(2).toULongLong(&okDisp, 16);
+            else
+                u = d.toULongLong(&okDisp, 10);
+            if (okDisp) disp = static_cast<qlonglong>(u);
+        }
+        if (!okDisp) return false;
+
+        const quint64 next = insn + len;
+        const quint64 target = static_cast<quint64>(static_cast<qlonglong>(next) + disp);
+        if (!m_stringByAddr.contains(target)) return false;
+        *outAddr = target;
+        return true;
+    }
+}
+
+QString DisassemblerTab::autoCommentForLine(const LineInfo &li) const
+{
+    // Auto-comment string references like IDA: ; "Hello world"
+    if (m_stringByAddr.isEmpty())
+        return {};
+    if (li.operands.isEmpty())
+        return {};
+
+    auto render = [](QString v) {
+        v.replace('\n', "\\n");
+        v.replace('\r', "\\r");
+        if (v.size() > 120) v = v.left(120) + "…";
+        return QString("; \"%1\"").arg(v);
+    };
+
+    quint64 addr = 0;
+    if (tryResolveStringRefAddr(li, &addr)) {
+        const QString v = m_stringByAddr.value(addr);
+        const int len = v.toUtf8().size(); // byte length without trailing 0
+        return render(v) + QString(" (%1)").arg(len);
+    }
+
+    return {};
+}
+
+QString DisassemblerTab::formatLine(const LineInfo &li) const
+{
+    // Simple IDA-like fixed columns (monospace)
+    // addr: right aligned to 10..16 chars; bytes: padded to 24 chars
+    QString addr = li.address.trimmed();
+    if (!addr.startsWith("0x")) addr = "0x" + addr;
+    addr = addr.rightJustified(12, ' ');
+
+    QString bytes = li.bytes;
+    if (!bytes.isEmpty()) {
+        // normalize spaces between bytes
+        const QString b = normalizeBytes(bytes);
+        QString spaced;
+        for (int i = 0; i < b.size(); i += 2) {
+            if (i) spaced += ' ';
+            spaced += b.mid(i, 2);
+        }
+        bytes = spaced;
+    }
+    // Prevent huge byte-runs from destroying layout (e.g. coalesced invalid blocks).
+    // Show preview of first 16 bytes in the "bytes" column.
+    {
+        const QString b = normalizeBytes(li.bytes);
+        const int totalBytes = b.size() / 2;
+        const int previewBytes = qMin(16, totalBytes);
+        if (totalBytes > 0) {
+            QString spaced;
+            for (int i = 0; i < previewBytes * 2; i += 2) {
+                if (i) spaced += ' ';
+                spaced += b.mid(i, 2);
+            }
+            if (totalBytes > previewBytes)
+                spaced += " …";
+            bytes = spaced;
+        }
+    }
+    bytes = bytes.leftJustified(28, ' ');
+
+    QString mnem = li.mnemonic;
+    QString ops  = li.operands;
+    const QString comment = autoCommentForLine(li);
+    const QString c = comment.isEmpty() ? QString() : ("  " + comment);
+
+    // radare2 can return "invalid" when bytes can't be decoded as an instruction.
+    // Render it as data bytes to keep the listing useful. Show only a preview to avoid huge lines.
+    if (mnem.trimmed().compare("invalid", Qt::CaseInsensitive) == 0 && !bytes.trimmed().isEmpty()) {
+        const QString b = normalizeBytes(li.bytes);
+        const int totalBytes = b.size() / 2;
+        const int previewBytes = qMin(16, totalBytes);
+
+        QStringList parts;
+        parts.reserve(previewBytes);
+        for (int i = 0; i + 1 < b.size() && (i / 2) < previewBytes; i += 2)
+            parts << ("0x" + b.mid(i, 2));
+
+        QString data = QString(".byte %1").arg(parts.join(", "));
+        if (totalBytes > previewBytes)
+            data += ", …";
+
+        const QString invInfo = QString("  ; invalid bytes (%1)").arg(totalBytes);
+        return QString("%1: %2  %3%4%5").arg(addr, bytes, data, c, invInfo);
+    }
+    if (!mnem.isEmpty() && ops.isEmpty())
+        return QString("%1: %2  %3%4").arg(addr, bytes, mnem, c);
+    if (mnem.isEmpty() && !ops.isEmpty())
+        return QString("%1: %2  %3%4").arg(addr, bytes, ops, c);
+    if (mnem.isEmpty() && ops.isEmpty())
+        return QString("%1: %2").arg(addr, bytes);
+    return QString("%1: %2  %3 %4%5").arg(addr, bytes, mnem, ops, c);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 DisassemblerTab::DisassemblerTab(QWidget *parent, QString path)
@@ -42,6 +249,10 @@ DisassemblerTab::DisassemblerTab(QWidget *parent, QString path)
             m_worker, &DisassemblerWorker::disassemble, Qt::QueuedConnection);
     connect(m_worker, &DisassemblerWorker::sectionFound,
             this,     &DisassemblerTab::onSectionFound,    Qt::QueuedConnection);
+    connect(m_worker, &DisassemblerWorker::functionsFound,
+            this,     &DisassemblerTab::onFunctionsFound,  Qt::QueuedConnection);
+    connect(m_worker, &DisassemblerWorker::stringsFound,
+            this,     &DisassemblerTab::onStringsFound,    Qt::QueuedConnection);
     connect(m_worker, &DisassemblerWorker::finished,
             this,     &DisassemblerTab::onWorkerFinished,  Qt::QueuedConnection);
     connect(m_worker, &DisassemblerWorker::errorOccurred,
@@ -53,8 +264,10 @@ DisassemblerTab::DisassemblerTab(QWidget *parent, QString path)
 
     m_thread->start();
 
-    // Set Data From File
-    this->setTabData();
+    connect(&GlobalWidgetsManager::instance(), &GlobalWidgetsManager::actionTriggered,
+            this, &DisassemblerTab::onGlobalActionTriggered);
+
+    updateBackendUiHint();
 }
 
 DisassemblerTab::~DisassemblerTab()
@@ -147,7 +360,7 @@ void DisassemblerTab::setupUi()
         "QSplitter::handle:hover { background: #2626d5; }");
     mainLayout->addWidget(m_splitter, 1);
 
-    // ── Top: stack (table / placeholder) ─────────────────────────────────────
+    // ── Top: stack (listing / placeholder) ───────────────────────────────────
     QWidget *topWidget = new QWidget(m_splitter);
     auto *topLayout = new QVBoxLayout(topWidget);
     topLayout->setContentsMargins(0, 0, 0, 0);
@@ -161,28 +374,296 @@ void DisassemblerTab::setupUi()
     m_placeholderLbl->setStyleSheet("color: #555555; font-size: 14px;");
     m_stack->addWidget(m_placeholderLbl);
 
-    m_table = new QTableWidget(topWidget);
-    m_table->setColumnCount(NUM_COLS);
-    m_table->setHorizontalHeaderLabels({tr("Address"), tr("Bytes"), tr("Mnemonic"), tr("Operands")});
-    m_table->verticalHeader()->setVisible(false);
-    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_table->setShowGrid(false);
-    m_table->setAlternatingRowColors(true);
-    m_table->horizontalHeader()->setStretchLastSection(true);
-    m_table->horizontalHeader()->setSectionResizeMode(COL_ADDR,     QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(COL_BYTES,    QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(COL_MNEMONIC, QHeaderView::ResizeToContents);
-    m_table->setStyleSheet(
-        "QTableWidget { background-color: #1f1f1f; alternate-background-color: #222222;"
-        "  gridline-color: #262626; border: none;"
-        "  font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 12px; }"
-        "QTableWidget::item { padding: 2px 8px; color: #cccccc; }"
-        "QTableWidget::item:selected { background: #2d2d50; color: #ffffff; }"
-        "QHeaderView::section { background: #262626; color: #888888; border: none;"
-        "  border-bottom: 1px solid #333333; padding: 4px 8px; font-size: 11px; }");
-    m_stack->addWidget(m_table);
+    // Functions panel + listing
+    m_topSplitter = new QSplitter(Qt::Horizontal, topWidget);
+    m_topSplitter->setHandleWidth(4);
+    m_topSplitter->setStyleSheet(
+        "QSplitter::handle { background: #1f1f1f; }"
+        "QSplitter::handle:hover { background: #2626d5; }");
+
+    m_funcPanel = new QWidget(m_topSplitter);
+    auto *funcLayout = new QVBoxLayout(m_funcPanel);
+    funcLayout->setContentsMargins(6, 6, 6, 6);
+    funcLayout->setSpacing(6);
+    auto *funcTitle = new QLabel(tr("Functions"), m_funcPanel);
+    funcTitle->setStyleSheet("color:#60a5fa; font-weight:600;");
+    funcLayout->addWidget(funcTitle);
+    m_funcFilterEdit = new QLineEdit(m_funcPanel);
+    m_funcFilterEdit->setPlaceholderText(tr("Filter…"));
+    funcLayout->addWidget(m_funcFilterEdit);
+    m_funcList = new QListWidget(m_funcPanel);
+    m_funcList->setObjectName("disasmFuncList");
+    m_funcList->setStyleSheet(
+        "QListWidget { background:#1a1a1a; border:1px solid #262626; color:#21c55d;"
+        "  font-family:'JetBrains Mono','Consolas',monospace; font-size:12px; }"
+        "QListWidget::item { padding: 4px 6px; }"
+        "QListWidget::item:selected { background:#2d2d50; color:#ffffff; }");
+    funcLayout->addWidget(m_funcList, 1);
+    m_funcPanel->setLayout(funcLayout);
+
+    connect(m_funcFilterEdit, &QLineEdit::textChanged, this, [this](const QString &q) {
+        const QString qq = q.trimmed().toLower();
+        for (int i = 0; i < m_funcList->count(); ++i) {
+            auto *it = m_funcList->item(i);
+            const QString t = it->text().toLower();
+            it->setHidden(!qq.isEmpty() && !t.contains(qq));
+        }
+    });
+    connect(m_funcList, &QListWidget::itemActivated, this, [this](QListWidgetItem *it) {
+        if (!it) return;
+        const QString addr = it->data(Qt::UserRole).toString();
+        if (!addr.isEmpty())
+            jumpToAddress(addr);
+    });
+    connect(m_funcList, &QListWidget::itemClicked, this, [this](QListWidgetItem *it) {
+        if (!it) return;
+        const QString addr = it->data(Qt::UserRole).toString();
+        if (!addr.isEmpty())
+            jumpToAddress(addr);
+    });
+
+    m_disasmView = new QPlainTextEdit(m_topSplitter);
+    m_disasmView->setReadOnly(true);
+    m_disasmView->setLineWrapMode(QPlainTextEdit::NoWrap);
+    m_disasmView->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    m_disasmView->setStyleSheet(
+        "QPlainTextEdit { background: #1f1f1f; border: none; padding: 6px;"
+        "  font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 12px;"
+        "  color: #60a5fa; }"
+        "QPlainTextEdit::selection { background: #2d2d50; color: #ffffff; }");
+    m_disasmView->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_disasmHighlighter = new DisasmTextHighlighter(m_disasmView->document());
+
+    connect(m_disasmView, &QPlainTextEdit::customContextMenuRequested, this, [this](const QPoint &pos) {
+        if (!m_disasmView) return;
+        const QTextCursor c = m_disasmView->cursorForPosition(pos);
+        const int visLine = c.blockNumber();
+        if (visLine < 0 || visLine >= m_visibleLineMap.size()) return;
+        const int idx = m_visibleLineMap[visLine];
+        if (idx < 0 || idx >= m_lines.size()) return; // ignore header/separator lines
+        const LineInfo &li = m_lines[idx];
+
+        QMenu menu(this);
+        menu.addAction(tr("Copy address"), [li]() {
+            QGuiApplication::clipboard()->setText(li.address.trimmed());
+        });
+        if (!li.bytes.trimmed().isEmpty()) {
+            menu.addAction(tr("Copy bytes"), [li]() {
+                QGuiApplication::clipboard()->setText(li.bytes.trimmed());
+            });
+        }
+
+        // Safe patching: only for radare2 backend where address is an offset we can write to.
+        const bool canPatchAtLine = (AppSettings::disasmBackend() == AppSettings::DisasmBackend::Radare2);
+        if (canPatchAtLine) {
+            menu.addSeparator();
+            menu.addAction(tr("Hex patch here…"), [this, li]() {
+                quint64 off = 0;
+                if (!parseHexU64(li.address, &off)) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Can't parse line address/offset."));
+                    return;
+                }
+
+                bool ok = false;
+                const QString text = QInputDialog::getText(
+                    this,
+                    tr("Hex patch"),
+                    tr("Hex bytes to write at %1:").arg(li.address.trimmed()),
+                    QLineEdit::Normal,
+                    QString(),
+                    &ok);
+                if (!ok) return;
+
+                bool okBytes = false;
+                const QByteArray newBytes = bytesToArray(text, &okBytes);
+                if (!okBytes || newBytes.isEmpty()) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Invalid hex bytes."));
+                    return;
+                }
+
+                QFile f(m_fileContext->filePath());
+                if (!f.open(QIODevice::ReadWrite)) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Failed to open file for writing."));
+                    return;
+                }
+                if (!f.seek(static_cast<qint64>(off))) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Failed to seek to offset 0x%1.").arg(QString::number(off, 16)));
+                    return;
+                }
+                const qint64 wr = f.write(newBytes);
+                f.close();
+                if (wr != newBytes.size()) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Failed to write all bytes."));
+                    return;
+                }
+
+                appendLog(QString("[hexpatch] wrote %1 bytes at 0x%2")
+                              .arg(newBytes.size())
+                              .arg(QString::number(off, 16)));
+                // Re-analyze to reflect changes in listing.
+                if (m_running) cancelDisassembly();
+                startDisassembly();
+            });
+
+            menu.addAction(tr("Patch bytes…"), [this, idx, li]() {
+                quint64 off = 0;
+                if (!parseHexU64(li.address, &off)) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Can't parse instruction address/offset."));
+                    return;
+                }
+
+                bool ok = false;
+                const QString cur = li.bytes.trimmed();
+                const QString text = QInputDialog::getText(
+                    this,
+                    tr("Patch bytes"),
+                    tr("Hex bytes (same length):"),
+                    QLineEdit::Normal,
+                    cur,
+                    &ok);
+                if (!ok) return;
+
+                bool okBytes = false;
+                const QByteArray newBytes = bytesToArray(text, &okBytes);
+                if (!okBytes) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Invalid hex bytes."));
+                    return;
+                }
+
+                bool okOld = false;
+                const QByteArray oldBytes = bytesToArray(cur, &okOld);
+                if (!okOld) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Current bytes are invalid."));
+                    return;
+                }
+                if (newBytes.size() != oldBytes.size()) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Byte length must match (%1 bytes).").arg(oldBytes.size()));
+                    return;
+                }
+
+                QFile f(m_fileContext->filePath());
+                if (!f.open(QIODevice::ReadWrite)) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Failed to open file for writing."));
+                    return;
+                }
+                if (!f.seek(static_cast<qint64>(off))) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Failed to seek to offset 0x%1.").arg(QString::number(off, 16)));
+                    return;
+                }
+                const qint64 wr = f.write(newBytes);
+                f.close();
+                if (wr != newBytes.size()) {
+                    QMessageBox::warning(this, tr("Patch"), tr("Failed to write all bytes."));
+                    return;
+                }
+
+                // Update cached bytes and refresh view.
+                m_lines[idx].bytes = normalizeBytes(text);
+                m_lines[idx].bytesL = m_lines[idx].bytes.toLower();
+                applyFilter();
+                appendLog(QString("[patch] wrote %1 bytes at 0x%2")
+                              .arg(newBytes.size())
+                              .arg(QString::number(off, 16)));
+            });
+        }
+
+        // Show raw bytes for referenced string (helps confirm full length incl. 00).
+        quint64 saddr = 0;
+        if (tryResolveStringRefAddr(li, &saddr)) {
+            menu.addSeparator();
+            if (canPatchAtLine) {
+                menu.addAction(tr("Hex patch string…"), [this, saddr]() {
+                    bool ok = false;
+                    const QString text = QInputDialog::getText(
+                        this,
+                        tr("Hex patch string"),
+                        tr("Hex bytes to write at string addr 0x%1:").arg(QString::number(saddr, 16)),
+                        QLineEdit::Normal,
+                        QString(),
+                        &ok);
+                    if (!ok) return;
+
+                    bool okBytes = false;
+                    const QByteArray newBytes = bytesToArray(text, &okBytes);
+                    if (!okBytes || newBytes.isEmpty()) {
+                        QMessageBox::warning(this, tr("String patch"), tr("Invalid hex bytes."));
+                        return;
+                    }
+
+                    QFile f(m_fileContext->filePath());
+                    if (!f.open(QIODevice::ReadWrite)) {
+                        QMessageBox::warning(this, tr("String patch"), tr("Failed to open file for writing."));
+                        return;
+                    }
+                    if (!f.seek(static_cast<qint64>(saddr))) {
+                        QMessageBox::warning(this, tr("String patch"), tr("Failed to seek to 0x%1.").arg(QString::number(saddr, 16)));
+                        return;
+                    }
+                    const qint64 wr = f.write(newBytes);
+                    f.close();
+                    if (wr != newBytes.size()) {
+                        QMessageBox::warning(this, tr("String patch"), tr("Failed to write all bytes."));
+                        return;
+                    }
+
+                    appendLog(QString("[hexpatch] wrote %1 bytes at string 0x%2")
+                                  .arg(newBytes.size())
+                                  .arg(QString::number(saddr, 16)));
+                    if (m_running) cancelDisassembly();
+                    startDisassembly();
+                });
+            }
+            menu.addAction(tr("Show string bytes…"), [this, saddr]() {
+                const QString str = m_stringByAddr.value(saddr);
+                const QByteArray utf8 = str.toUtf8();
+                const int want = utf8.size() + 1; // include '\0'
+
+                QFile f(m_fileContext->filePath());
+                if (!f.open(QIODevice::ReadOnly)) {
+                    QMessageBox::warning(this, tr("String bytes"), tr("Failed to open file."));
+                    return;
+                }
+                if (!f.seek(static_cast<qint64>(saddr))) {
+                    QMessageBox::warning(this, tr("String bytes"), tr("Failed to seek to 0x%1.").arg(QString::number(saddr, 16)));
+                    return;
+                }
+                const QByteArray data = f.read(want);
+                f.close();
+
+                QStringList hx;
+                hx.reserve(data.size());
+                for (unsigned char ch : data)
+                    hx << QString("%1").arg(ch, 2, 16, QLatin1Char('0')).toUpper();
+
+                QString ascii;
+                ascii.reserve(data.size());
+                for (unsigned char ch : data) {
+                    if (ch >= 0x20 && ch < 0x7f) ascii += QChar(ch);
+                    else if (ch == 0) ascii += "\\0";
+                    else ascii += ".";
+                }
+
+                QMessageBox::information(
+                    this,
+                    tr("String bytes"),
+                    tr("addr: 0x%1\nlen: %2 (+1 null)\n\nhex:\n%3\n\nascii:\n%4")
+                        .arg(QString::number(saddr, 16))
+                        .arg(utf8.size())
+                        .arg(hx.join(' '))
+                        .arg(ascii));
+            });
+        }
+
+        menu.exec(m_disasmView->viewport()->mapToGlobal(pos));
+    });
+
+    m_topSplitter->addWidget(m_funcPanel);
+    m_topSplitter->addWidget(m_disasmView);
+    m_topSplitter->setStretchFactor(0, 0);
+    m_topSplitter->setStretchFactor(1, 1);
+    m_topSplitter->setSizes({220, 1000});
+
+    m_stack->addWidget(m_topSplitter);
     m_splitter->addWidget(topWidget);
 
     // ── Bottom: log panel ─────────────────────────────────────────────────────
@@ -234,14 +715,34 @@ void DisassemblerTab::setupUi()
     mainLayout->addWidget(m_statusLabel);
 
     showPlaceholder(tr("Press \"Disassemble\" to analyse the file"));
+    m_statusLabel->setText(tr("Backend: %1").arg(
+        AppSettings::disasmBackend() == AppSettings::DisasmBackend::Radare2 ? tr("radare2") : tr("objdump")));
 
     // ── Connections ───────────────────────────────────────────────────────────
     connect(m_runBtn,       &QPushButton::clicked,
             this,           &DisassemblerTab::startDisassembly);
     connect(m_cancelBtn,    &QPushButton::clicked,
             this,           &DisassemblerTab::cancelDisassembly);
-    connect(m_searchEdit,   &QLineEdit::textChanged,
-            this,           &DisassemblerTab::onSearchTextChanged);
+    // Debounced search: avoids rebuilding UI on every keystroke.
+    m_searchDebounce = new QTimer(this);
+    m_searchDebounce->setSingleShot(true);
+    m_searchDebounce->setInterval(150);
+    connect(m_searchDebounce, &QTimer::timeout, this, &DisassemblerTab::applyFilter);
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString &) {
+        if (m_searchDebounce) m_searchDebounce->start();
+    });
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, [this]() {
+        if (!m_disasmView) return;
+        const QString q = m_searchEdit->text().trimmed();
+        if (q.isEmpty()) return;
+        if (!m_disasmView->find(q)) {
+            // wrap-around
+            QTextCursor c = m_disasmView->textCursor();
+            c.movePosition(QTextCursor::Start);
+            m_disasmView->setTextCursor(c);
+            m_disasmView->find(q);
+        }
+    });
     connect(m_sectionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this,           &DisassemblerTab::onSectionComboChanged);
     connect(m_logToggleBtn, &QPushButton::toggled, this, [this](bool checked) {
@@ -253,6 +754,28 @@ void DisassemblerTab::setupUi()
         }
     });
     connect(clearBtn, &QPushButton::clicked, m_logView, &QPlainTextEdit::clear);
+
+    // F5: re-analyze / disassemble again
+    auto *reanalyze = new QShortcut(QKeySequence(Qt::Key_F5), this);
+    reanalyze->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(reanalyze, &QShortcut::activated, this, [this]() {
+        if (m_running) cancelDisassembly();
+        startDisassembly();
+    });
+}
+
+void DisassemblerTab::updateBackendUiHint()
+{
+    if (m_running) return;
+    const QString backend = (AppSettings::disasmBackend() == AppSettings::DisasmBackend::Radare2) ? tr("radare2") : tr("objdump");
+    m_statusLabel->setText(tr("Backend: %1").arg(backend));
+}
+
+void DisassemblerTab::onGlobalActionTriggered(const QString &actionName)
+{
+    if (actionName != "settingsChanged") return;
+    appendLog("[settings] applied");
+    updateBackendUiHint();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -261,8 +784,34 @@ void DisassemblerTab::startDisassembly()
     if (m_running) return;
     if (m_fileContext->filePath().isEmpty()) { showPlaceholder(tr("No file path set")); return; }
 
+    // If radare2 backend is selected, ensure r2 is available. If not, prompt for path.
+    if (AppSettings::disasmBackend() == AppSettings::DisasmBackend::Radare2) {
+        QString r2 = AppSettings::radare2Path();
+        if (r2.isEmpty())
+            r2 = QStandardPaths::findExecutable("r2");
+
+        if (r2.isEmpty()) {
+            const QString picked = QFileDialog::getOpenFileName(
+                this,
+                tr("Select radare2 (r2) executable"),
+                QString());
+            if (picked.isEmpty()) {
+                appendLog("[disasm] radare2 not configured; cancelled");
+                showPlaceholder(tr("radare2 is not configured — set it in Settings"));
+                return;
+            }
+            AppSettings::setRadare2Path(picked);
+        }
+    }
+
     m_sections.clear();
-    m_table->setRowCount(0);
+    m_functions.clear();
+    m_strings.clear();
+    m_stringByAddr.clear();
+    m_lines.clear();
+    m_visibleLineMap.clear();
+    if (m_disasmView) m_disasmView->clear();
+    if (m_funcList) m_funcList->clear();
     m_sectionCombo->blockSignals(true);
     m_sectionCombo->clear();
     m_sectionCombo->blockSignals(false);
@@ -272,7 +821,10 @@ void DisassemblerTab::startDisassembly()
 
     m_progressBar->setValue(0);
     m_progressBar->setVisible(true);
-    m_statusLabel->setText(tr("Running objdump…"));
+    m_statusLabel->setText(
+        AppSettings::disasmBackend() == AppSettings::DisasmBackend::Radare2
+            ? tr("Running radare2…")
+            : tr("Running objdump…"));
 
     // Auto-open log panel when disassembly starts so user sees progress
     if (!m_logToggleBtn->isChecked()) {
@@ -281,6 +833,8 @@ void DisassemblerTab::startDisassembly()
 
     appendLog("=== Disassembly started: " +
               QDateTime::currentDateTime().toString("hh:mm:ss") + " ===");
+    appendLog(QString("[disasm] backend: %1")
+                  .arg(AppSettings::disasmBackend() == AppSettings::DisasmBackend::Radare2 ? "radare2" : "objdump"));
 
     setRunningState(true);
     showPlaceholder(tr("Disassembling…"));
@@ -312,34 +866,31 @@ void DisassemblerTab::appendLog(const QString &line)
 void DisassemblerTab::onSectionFound(const DisasmSection &section)
 {
     if (section.instructions.isEmpty()) return;
+    const int secIndex = m_sections.size();
     m_sections.append(section);
 
     if (m_sections.size() == 1) {
-        m_stack->setCurrentWidget(m_table);
+        // Listing UI is hosted inside m_topSplitter which is a direct child of m_stack.
+        m_stack->setCurrentWidget(m_topSplitter);
         populateSectionCombo();
     }
 
     if (m_currentSectionIndex == -1) {
-        m_table->setUpdatesEnabled(false);
         for (const DisasmInstruction &insn : section.instructions) {
-            bool isLabel = insn.bytes.isEmpty();
-            int row = m_table->rowCount();
-            m_table->insertRow(row);
-            auto mkItem = [&](const QString &txt) {
-                auto *it = new QTableWidgetItem(txt);
-                it->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
-                if (isLabel) {
-                    it->setForeground(QColor("#5555ff"));
-                    QFont f = it->font(); f.setBold(true); it->setFont(f);
-                }
-                return it;
-            };
-            m_table->setItem(row, COL_ADDR,     mkItem(insn.address));
-            m_table->setItem(row, COL_BYTES,    mkItem(isLabel ? QString() : insn.bytes));
-            m_table->setItem(row, COL_MNEMONIC, mkItem(insn.mnemonic));
-            m_table->setItem(row, COL_OPERANDS, mkItem(insn.operands));
+            LineInfo li;
+            li.sectionIndex = secIndex;
+            li.address = insn.address;
+            li.bytes = insn.bytes;
+            li.mnemonic = insn.mnemonic;
+            li.operands = insn.operands;
+            li.addrL  = insn.address.toLower();
+            li.bytesL = insn.bytes.toLower();
+            li.mnemL  = insn.mnemonic.toLower();
+            li.opsL   = insn.operands.toLower();
+            m_lines.append(std::move(li));
         }
-        m_table->setUpdatesEnabled(true);
+        // Render incrementally in "All sections" mode for responsiveness.
+        applyFilter();
     }
 
     populateSectionCombo();
@@ -348,6 +899,96 @@ void DisassemblerTab::onSectionFound(const DisasmSection &section)
     for (const auto &s : m_sections) total += s.instructions.size();
     m_statusLabel->setText(
         tr("%1 section(s) · %2 instructions loaded…").arg(m_sections.size()).arg(total));
+}
+
+void DisassemblerTab::onFunctionsFound(const QVector<DisasmFunction> &funcs)
+{
+    setFunctionsList(funcs);
+}
+
+void DisassemblerTab::onStringsFound(const QVector<DisasmString> &strings)
+{
+    m_strings = strings;
+    m_stringByAddr.clear();
+    m_stringByAddr.reserve(strings.size());
+    for (const auto &s : strings) {
+        quint64 a = 0;
+        if (!parseHexU64(s.address, &a)) continue;
+        if (!m_stringByAddr.contains(a))
+            m_stringByAddr.insert(a, s.value);
+    }
+    applyFilter();
+}
+
+void DisassemblerTab::setFunctionsList(const QVector<DisasmFunction> &funcs)
+{
+    m_functions = funcs;
+    if (!m_funcList) return;
+    m_funcList->clear();
+
+    // Sort by address (hex) when possible
+    QVector<DisasmFunction> sorted = m_functions;
+    std::sort(sorted.begin(), sorted.end(), [](const DisasmFunction &a, const DisasmFunction &b) {
+        quint64 va = 0, vb = 0;
+        const bool oka = parseHexU64(a.address, &va);
+        const bool okb = parseHexU64(b.address, &vb);
+        if (oka && okb) return va < vb;
+        return a.name < b.name;
+    });
+
+    for (const auto &f : sorted) {
+        auto *it = new QListWidgetItem(QString("%1  %2").arg(f.address, f.name), m_funcList);
+        it->setData(Qt::UserRole, f.address);
+    }
+}
+
+void DisassemblerTab::rebuildFunctionsFromLines()
+{
+    // For objdump backend: function labels come as mnemonic "<name>" with empty bytes.
+    QVector<DisasmFunction> funcs;
+    funcs.reserve(256);
+    for (const auto &li : m_lines) {
+        const QString m = li.mnemonic.trimmed();
+        if (m.size() >= 3 && m.startsWith('<') && m.endsWith('>')) {
+            DisasmFunction f;
+            f.address = li.address.trimmed();
+            f.name = m.mid(1, m.size() - 2);
+            funcs.append(std::move(f));
+        }
+    }
+    if (!funcs.isEmpty())
+        setFunctionsList(funcs);
+}
+
+void DisassemblerTab::jumpToAddress(const QString &addr)
+{
+    if (!m_disasmView) return;
+    // Search within current visible listing by "ADDR:" prefix.
+    QString needle = addr.trimmed().toLower();
+    if (needle.startsWith("0x")) needle = needle.mid(2);
+    if (needle.isEmpty()) return;
+
+    QTextCursor cur(m_disasmView->document());
+    cur.movePosition(QTextCursor::Start);
+    while (true) {
+        const QTextBlock b = cur.block();
+        if (!b.isValid()) break;
+        const QString line = b.text().toLower();
+        // line begins with right-justified addr, format: "    0x401000: ..."
+        int colon = line.indexOf(':');
+        if (colon > 0) {
+            QString left = line.left(colon);
+            left.remove(' ');
+            if (left.startsWith("0x")) left = left.mid(2);
+            if (left.startsWith(needle)) {
+                QTextCursor c(b);
+                m_disasmView->setTextCursor(c);
+                m_disasmView->centerCursor();
+                return;
+            }
+        }
+        cur.movePosition(QTextCursor::NextBlock);
+    }
 }
 
 void DisassemblerTab::onWorkerFinished()
@@ -373,6 +1014,10 @@ void DisassemblerTab::onWorkerFinished()
 
     m_sectionCombo->setEnabled(true);
     m_searchEdit->setEnabled(true);
+
+    // If backend didn't provide functions (objdump), derive from labels.
+    if (m_functions.isEmpty())
+        rebuildFunctionsFromLines();
 }
 
 void DisassemblerTab::onWorkerError(const QString &msg)
@@ -423,6 +1068,10 @@ void DisassemblerTab::onSectionComboChanged(int index)
 
 void DisassemblerTab::onSearchTextChanged(const QString &)
 {
+    if (m_searchDebounce) {
+        m_searchDebounce->start();
+        return;
+    }
     applyFilter();
 }
 
@@ -432,51 +1081,87 @@ void DisassemblerTab::applyFilter()
 
     const QString query = m_searchEdit->text().trimmed().toLower();
 
-    QVector<const DisasmSection *> visible;
-    if (m_currentSectionIndex < 0)
-        for (const auto &s : m_sections) visible.append(&s);
-    else if (m_currentSectionIndex < m_sections.size())
-        visible.append(&m_sections[m_currentSectionIndex]);
+    if (!m_disasmView) return;
 
-    m_table->setUpdatesEnabled(false);
-    m_table->setRowCount(0);
+    m_visibleLineMap.clear();
+    QStringList out;
+    out.reserve(m_lines.size());
 
-    for (const DisasmSection *sec : visible) {
-        for (const DisasmInstruction &insn : sec->instructions) {
-            bool isLabel = insn.bytes.isEmpty();
-            if (!query.isEmpty()) {
-                bool match = insn.address.toLower().contains(query)
-                          || insn.mnemonic.toLower().contains(query)
-                          || insn.operands.toLower().contains(query)
-                          || insn.bytes.toLower().contains(query);
-                if (!match) continue;
-            }
-            int row = m_table->rowCount();
-            m_table->insertRow(row);
-            auto mkItem = [&](const QString &txt) {
-                auto *it = new QTableWidgetItem(txt);
-                it->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
-                if (isLabel) {
-                    it->setForeground(QColor("#5555ff"));
-                    QFont f = it->font(); f.setBold(true); it->setFont(f);
-                }
-                return it;
-            };
-            m_table->setItem(row, COL_ADDR,     mkItem(insn.address));
-            m_table->setItem(row, COL_BYTES,    mkItem(isLabel ? QString() : insn.bytes));
-            m_table->setItem(row, COL_MNEMONIC, mkItem(insn.mnemonic));
-            m_table->setItem(row, COL_OPERANDS, mkItem(insn.operands));
+    const bool haveQuery = !query.isEmpty();
+    int shown = 0;
+
+    // Function separators (IDA-like): show a header when we hit a function start.
+    QHash<QString, QString> funcByAddr;
+    funcByAddr.reserve(m_functions.size());
+    for (const auto &f : m_functions)
+        funcByAddr.insert(f.address.trimmed().toLower(), f.name);
+
+    for (int i = 0; i < m_lines.size(); ++i) {
+        const LineInfo &li = m_lines[i];
+        const bool inSection = (m_currentSectionIndex < 0) || (li.sectionIndex == m_currentSectionIndex);
+        if (!inSection) continue;
+        if (haveQuery) {
+            const bool match = li.addrL.contains(query)
+                            || li.bytesL.contains(query)
+                            || li.mnemL.contains(query)
+                            || li.opsL.contains(query);
+            if (!match) continue;
         }
+
+        const QString a = li.address.trimmed().toLower();
+        if (funcByAddr.contains(a)) {
+            out << QString("; ─── %1 (%2) ───").arg(funcByAddr.value(a), li.address.trimmed());
+            m_visibleLineMap << -1; // header line
+        }
+
+        // Coalesce consecutive "invalid" into a single data line (radare2 often marks undecodable bytes one-by-one).
+        if (li.mnemonic.trimmed().compare("invalid", Qt::CaseInsensitive) == 0 && !li.bytes.trimmed().isEmpty()) {
+            quint64 curAddr = 0;
+            if (parseHexU64(li.address, &curAddr)) {
+                QString joined = normalizeBytes(li.bytes);
+                quint64 nextExpected = curAddr + static_cast<quint64>(joined.size() / 2);
+
+                int j = i + 1;
+                for (; j < m_lines.size(); ++j) {
+                    const LineInfo &n = m_lines[j];
+                    if (n.sectionIndex != li.sectionIndex) break;
+                    if (n.mnemonic.trimmed().compare("invalid", Qt::CaseInsensitive) != 0) break;
+                    const QString nb = normalizeBytes(n.bytes);
+                    if (nb.isEmpty()) break;
+                    quint64 na = 0;
+                    if (!parseHexU64(n.address, &na)) break;
+                    if (na != nextExpected) break;
+                    joined += nb;
+                    nextExpected += static_cast<quint64>(nb.size() / 2);
+                }
+
+                LineInfo tmp = li;
+                tmp.bytes = joined;
+                tmp.bytesL = joined.toLower();
+                tmp.operands.clear();
+                tmp.opsL.clear();
+
+                out << formatLine(tmp);
+                m_visibleLineMap << i; // map to first underlying line (hex-patch here still works)
+                ++shown;
+                i = j - 1;
+                continue;
+            }
+        }
+
+        out << formatLine(li);
+        m_visibleLineMap << i;
+        ++shown;
     }
 
-    m_table->setUpdatesEnabled(true);
+    m_disasmView->setPlainText(out.join('\n'));
 
-    if (m_table->rowCount() == 0 && !m_sections.isEmpty())
+    if (shown == 0) {
         showPlaceholder(tr("No results for \"%1\"").arg(m_searchEdit->text()));
-    else
-        m_stack->setCurrentWidget(m_table);
-
-    m_statusLabel->setText(tr("%1 rows shown").arg(m_table->rowCount()));
+    } else {
+        m_stack->setCurrentWidget(m_topSplitter);
+    }
+    m_statusLabel->setText(tr("%1 line(s) shown").arg(shown));
 }
 
 #include "moc_disassemblertab.cpp"

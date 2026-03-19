@@ -1,7 +1,10 @@
 #include "disassemblerworker.h"
+#include "utils/appsettings.h"
+#include "widgets/disasm/backends/radare2backend.h"
 
 #include <QProcess>
 #include <QRegularExpression>
+#include <QStandardPaths>
 
 DisassemblerWorker::DisassemblerWorker(QObject *parent)
     : QObject{parent}
@@ -45,6 +48,61 @@ void DisassemblerWorker::disassemble(const QString &filePath, const QString &arc
 {
     m_cancelled = false;
 
+    // ── backend selection ─────────────────────────────────────────────────
+    if (AppSettings::disasmBackend() == AppSettings::DisasmBackend::Radare2) {
+        QString r2 = AppSettings::radare2Path();
+        if (r2.isEmpty())
+            r2 = QStandardPaths::findExecutable("r2");
+
+        emit logLine("[disasm] backend   : radare2");
+        emit logLine("[disasm] r2        : " + (r2.isEmpty() ? QString("(not found)") : r2));
+
+        if (r2.isEmpty()) {
+            emit errorOccurred(tr("radare2 (r2) not found. Set its path in Settings."));
+            emit finished();
+            return;
+        }
+
+        Radare2Backend::Options opt;
+        opt.insnLimitPerSection = AppSettings::disasmInsnLimitPerSection();
+        opt.analysisLevel = static_cast<int>(AppSettings::radare2AnalysisLevel());
+        opt.asmSyntax = static_cast<int>(AppSettings::asmSyntax());
+        opt.preCommands = AppSettings::radare2PreCommands();
+
+        emit logLine(QString("[disasm] insnLimit : %1").arg(opt.insnLimitPerSection));
+        emit logLine(QString("[disasm] r2Analyze : %1").arg(opt.analysisLevel == 2 ? "aaa" : (opt.analysisLevel == 1 ? "aa" : "none")));
+        emit logLine(QString("[disasm] syntax    : %1").arg(opt.asmSyntax == 1 ? "att" : "intel"));
+
+        auto result = Radare2Backend::disassembleFile(r2, filePath, opt, &m_cancelled);
+        if (!result.error.isEmpty()) {
+            emit errorOccurred(result.error);
+            emit finished();
+            return;
+        }
+
+        if (!result.functions.isEmpty())
+            emit functionsFound(result.functions);
+        if (!result.strings.isEmpty())
+            emit stringsFound(result.strings);
+
+        emit logLine(QString("[disasm] sections parsed: %1").arg(result.sections.size()));
+        for (const auto &s : result.sections)
+            emit logLine(QString("[disasm]   section '%1': %2 instructions")
+                             .arg(s.name).arg(s.instructions.size()));
+
+        const int total = result.sections.size();
+        for (int i = 0; i < total; ++i) {
+            if (m_cancelled) break;
+            emit sectionFound(result.sections[i]);
+            emit progressUpdated(total == 0 ? 100 : (i + 1) * 100 / total);
+        }
+
+        emit finished();
+        return;
+    }
+
+    emit logLine("[disasm] backend   : objdump");
+
     // ── arch detection ────────────────────────────────────────────────────
     QString effectiveArch = arch.isEmpty() ? detectArch(filePath) : arch;
 
@@ -52,16 +110,27 @@ void DisassemblerWorker::disassemble(const QString &filePath, const QString &arc
     emit logLine("[disasm] arch-hint : " + (effectiveArch.isEmpty() ? "(auto)" : effectiveArch));
 
     // ── build objdump command ─────────────────────────────────────────────
+    QString objdumpExe = AppSettings::objdumpPath();
+    if (objdumpExe.isEmpty())
+        objdumpExe = QStandardPaths::findExecutable("objdump");
+    if (objdumpExe.isEmpty())
+        objdumpExe = "objdump";
+
     QStringList args;
     args << "-d";
     if (!effectiveArch.isEmpty()) {
         args << "-m" << effectiveArch;
-        if (effectiveArch.contains("i386") || effectiveArch.contains("x86"))
-            args << "-M" << "intel";
+        if (effectiveArch.contains("i386") || effectiveArch.contains("x86")) {
+            if (AppSettings::asmSyntax() == AppSettings::AsmSyntax::Att)
+                args << "-M" << "att";
+            else
+                args << "-M" << "intel";
+        }
     }
     args << filePath;
 
-    emit logLine("[disasm] command   : objdump " + args.join(' '));
+    emit logLine("[disasm] objdump   : " + objdumpExe);
+    emit logLine("[disasm] command   : " + objdumpExe + " " + args.join(' '));
 
     // ── launch process ────────────────────────────────────────────────────
     // Force C locale: ensures English section headers ("Disassembly of section")
@@ -72,7 +141,7 @@ void DisassemblerWorker::disassemble(const QString &filePath, const QString &arc
     env.insert("LC_ALL", "C");
     proc.setProcessEnvironment(env);
     proc.setProcessChannelMode(QProcess::SeparateChannels);
-    proc.start("objdump", args);
+    proc.start(objdumpExe, args);
 
     if (!proc.waitForStarted(5000)) {
         emit logLine("[disasm] ERROR: failed to start objdump");

@@ -5,8 +5,11 @@
 #include "disassemblerworker.h"
 #include <QWidget>
 #include <QThread>
+#include <QHash>
 
-class QTableWidget;
+#include <QGuiApplication>
+#include <QClipboard>
+
 class QPlainTextEdit;
 class QLabel;
 class QProgressBar;
@@ -15,6 +18,10 @@ class QComboBox;
 class QLineEdit;
 class QStackedWidget;
 class QSplitter;
+class QTimer;
+class DisasmTextHighlighter;
+class QListWidget;
+
 
 class DisassemblerTab : public ToolTab
 {
@@ -23,6 +30,23 @@ class DisassemblerTab : public ToolTab
 public:
     explicit DisassemblerTab(QWidget *parent, QString path);
     ~DisassemblerTab();
+
+    void saveToFile(QString path) {}
+    void setTabData(QByteArray &data);
+
+    struct LineInfo {
+        int sectionIndex = -1; // index in m_sections
+        QString address;
+        QString bytes;
+        QString mnemonic;
+        QString operands;
+
+        // Cached lowercase for fast search
+        QString addrL;
+        QString bytesL;
+        QString mnemL;
+        QString opsL;
+    };
 
 signals:
     void requestDisassembly(const QString &filePath, const QString &arch);
@@ -34,6 +58,8 @@ public slots:
 private slots:
 
     void onSectionFound(const DisasmSection &section);
+    void onFunctionsFound(const QVector<DisasmFunction> &funcs);
+    void onStringsFound(const QVector<DisasmString> &strings);
     void onWorkerFinished();
     void onWorkerError(const QString &msg);
     void onProgressUpdated(int percent);
@@ -42,20 +68,35 @@ private slots:
     void onSectionComboChanged(int index);
     void startDisassembly();
     void cancelDisassembly();
+    void onGlobalActionTriggered(const QString &actionName);
 
 private:
     void setupUi();
     void setRunningState(bool running);
     void showPlaceholder(const QString &msg);
+    void updateBackendUiHint();
     void populateSectionCombo();
     void applyFilter();
     void appendLog(const QString &line);
+    QString formatLine(const LineInfo &li) const;
+    void rebuildFunctionsFromLines();          // objdump labels
+    void setFunctionsList(const QVector<DisasmFunction> &funcs);
+    void jumpToAddress(const QString &addr);
+    QString autoCommentForLine(const LineInfo &li) const;
+    bool tryResolveStringRefAddr(const LineInfo &li, quint64 *outAddr) const;
 
     QThread            *m_thread  = nullptr;
     DisassemblerWorker *m_worker  = nullptr;
     bool                m_running = false;
 
     QVector<DisasmSection> m_sections;
+    QVector<DisasmFunction> m_functions;
+    QVector<DisasmString> m_strings;
+    QHash<quint64, QString> m_stringByAddr; // for fast auto-comments
+
+    QVector<LineInfo> m_lines;
+    QVector<int> m_visibleLineMap; // visible line idx -> m_lines idx
+    QTimer *m_searchDebounce = nullptr;
 
     // UI
     QWidget        *m_toolbar        = nullptr;
@@ -68,7 +109,12 @@ private:
     QLabel         *m_statusLabel    = nullptr;
     QSplitter      *m_splitter       = nullptr;
     QStackedWidget *m_stack          = nullptr;
-    QTableWidget   *m_table          = nullptr;
+    QSplitter      *m_topSplitter    = nullptr; // functions | listing
+    QWidget        *m_funcPanel      = nullptr;
+    QLineEdit      *m_funcFilterEdit = nullptr;
+    QListWidget    *m_funcList       = nullptr;
+    QPlainTextEdit *m_disasmView     = nullptr;
+    DisasmTextHighlighter *m_disasmHighlighter = nullptr;
     QLabel         *m_placeholderLbl = nullptr;
     QWidget        *m_logPanel       = nullptr;
     QPlainTextEdit *m_logView        = nullptr;

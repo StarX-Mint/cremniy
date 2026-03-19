@@ -41,6 +41,10 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
 
         dialogs/filecreatedialog.cpp
         dialogs/filecreatedialog.h
+        dialogs/settingsdialog.cpp
+        dialogs/settingsdialog.h
+        dialogs/reversecalculatordialog.cpp
+        dialogs/reversecalculatordialog.h
 
         widgets/clickablelineedit.cpp
         widgets/clickablelineedit.h
@@ -63,6 +67,13 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         widgets/disassemblertab.h widgets/disassemblertab.cpp
         widgets/disassemblerworker.h widgets/disassemblerworker.cpp
 
+        widgets/disasm/backends/radare2backend.h
+        widgets/disasm/backends/radare2backend.cpp
+        widgets/disasm/disasmsyntaxdelegate.h
+        widgets/disasm/disasmsyntaxdelegate.cpp
+        widgets/disasm/disasmtexthighlighter.h
+        widgets/disasm/disasmtexthighlighter.cpp
+
         # Generated moc source for DisassemblerWorker
         ${DISASSEMBLERWORKER_MOC_SRCS}
 
@@ -71,6 +82,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
 
         utils/utils.h
         utils/utils.cpp
+        utils/appsettings.h
+        utils/appsettings.cpp
         utils/globalwidgetsmanager.h
 
         utils/filecontext.h
@@ -82,6 +95,7 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/widgets
+        ${CMAKE_CURRENT_SOURCE_DIR}/widgets/disasm/backends
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/utils)
 else()

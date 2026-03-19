@@ -127,3 +127,4 @@ ParseCache.txt
 timestamp
 deps/
 
+*.zip

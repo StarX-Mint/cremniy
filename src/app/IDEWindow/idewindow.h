@@ -26,6 +26,10 @@ private slots:
 
     void onClosingProject();
 
+    void on_menuBar_actionView_wordWrap_clicked();
+    void onOpenSettings();
+    void onOpenReverseCalculator();
+
 private:
     QMenuBar* m_menuBar;
     QStatusBar* m_statusBar;
@@ -45,6 +49,9 @@ private:
     QAction* m_git_commit;
     QAction* m_git_commitAndPush;
     QAction* m_git_setBranch;
+
+    QAction* m_edit_settings;
+    QAction* m_edit_reverseCalculator;
 
     QWidget* m_mainWidget;
     QHBoxLayout* m_mainLayout;

@@ -9,6 +9,8 @@
 #include <QApplication>
 #include "globalwidgetsmanager.h"
 #include "app/WelcomeWindow/welcomeform.h"
+#include "dialogs/settingsdialog.h"
+#include "dialogs/reversecalculatordialog.h"
 
 IDEWindow::IDEWindow(QString ProjectPath, QWidget *parent)
     : QMainWindow(parent)
@@ -35,6 +37,10 @@ IDEWindow::IDEWindow(QString ProjectPath, QWidget *parent)
     m_view_wordWrap->setChecked(true);
     GlobalWidgetsManager::instance().set_IDEWindow_menuBar_view_wordWrap(m_view_wordWrap);
 
+    m_edit_settings = new QAction("Settings", this);
+    m_edit_reverseCalculator = new QAction("Reverse Calculator", this);
+    m_edit_reverseCalculator->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+
     m_git_commit = new QAction("Commit", this);
     m_git_commitAndPush = new QAction("Commit And Push", this);
     m_git_setBranch = new QAction("Set Branch", this);
@@ -47,7 +53,7 @@ IDEWindow::IDEWindow(QString ProjectPath, QWidget *parent)
 
     m_filesTabWidget = new FilesTabWidget();
     QWidget* leftWidget = new QWidget();
-    QVBoxLayout* leftLayout = new QVBoxLayout(m_mainWidget);
+    QVBoxLayout* leftLayout = new QVBoxLayout(leftWidget);
     leftLayout->setContentsMargins(0,0,0,0);
     m_filesTreeView = new FileTreeView();
 
@@ -88,6 +94,9 @@ IDEWindow::IDEWindow(QString ProjectPath, QWidget *parent)
     m_fileMenu->addAction(m_file_closeProject);
 
     m_viewMenu->addAction(m_view_wordWrap);
+
+    m_editMenu->addAction(m_edit_settings);
+    m_editMenu->addAction(m_edit_reverseCalculator);
 
     m_gitMenu->addAction(m_git_commit);
     m_gitMenu->addAction(m_git_commitAndPush);
@@ -154,11 +163,34 @@ IDEWindow::IDEWindow(QString ProjectPath, QWidget *parent)
     connect(m_filesTreeView, &QTreeView::customContextMenuRequested,
             this, &IDEWindow::onTreeContextMenu);
 
+    connect(m_view_wordWrap, &QAction::triggered, this, &IDEWindow::on_menuBar_actionView_wordWrap_clicked);
+    connect(m_edit_settings, &QAction::triggered, this, &IDEWindow::onOpenSettings);
+    connect(m_edit_reverseCalculator, &QAction::triggered, this, &IDEWindow::onOpenReverseCalculator);
+
     connect(m_filesTreeView, &QTreeView::doubleClicked, this, &IDEWindow::on_treeView_doubleClicked);
 }
 
 IDEWindow::~IDEWindow()
 {}
+
+void IDEWindow::on_menuBar_actionView_wordWrap_clicked(){
+    qDebug() << "on_menuBar_actionView_wordWrap_clicked";
+}
+
+void IDEWindow::onOpenSettings()
+{
+    SettingsDialog dlg(this);
+    dlg.exec();
+}
+
+void IDEWindow::onOpenReverseCalculator()
+{
+    auto *dlg = new ReverseCalculatorDialog(this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+    dlg->show();
+    dlg->raise();
+    dlg->activateWindow();
+}
 
 void IDEWindow::SaveProjectInCache(const QString project_path){
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);

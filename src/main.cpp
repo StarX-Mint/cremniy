@@ -1,10 +1,13 @@
 #include "app/WelcomeWindow/welcomeform.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
+    QCoreApplication::setOrganizationName("cremniy");
+    QCoreApplication::setApplicationName("Cremniy");
     a.setWindowIcon(QIcon(":/icons/icon.png"));
 
     QFile file(":/styles/style.qss");
