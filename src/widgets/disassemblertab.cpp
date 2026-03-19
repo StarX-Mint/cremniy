@@ -478,7 +478,7 @@ void DisassemblerTab::setupUi()
                     return;
                 }
 
-                QFile f(m_filePath);
+                QFile f(m_fileContext->filePath());
                 if (!f.open(QIODevice::ReadWrite)) {
                     QMessageBox::warning(this, tr("Patch"), tr("Failed to open file for writing."));
                     return;
@@ -538,7 +538,7 @@ void DisassemblerTab::setupUi()
                     return;
                 }
 
-                QFile f(m_filePath);
+                QFile f(m_fileContext->filePath());
                 if (!f.open(QIODevice::ReadWrite)) {
                     QMessageBox::warning(this, tr("Patch"), tr("Failed to open file for writing."));
                     return;
@@ -587,7 +587,7 @@ void DisassemblerTab::setupUi()
                         return;
                     }
 
-                    QFile f(m_filePath);
+                    QFile f(m_fileContext->filePath());
                     if (!f.open(QIODevice::ReadWrite)) {
                         QMessageBox::warning(this, tr("String patch"), tr("Failed to open file for writing."));
                         return;
@@ -615,7 +615,7 @@ void DisassemblerTab::setupUi()
                 const QByteArray utf8 = str.toUtf8();
                 const int want = utf8.size() + 1; // include '\0'
 
-                QFile f(m_filePath);
+                QFile f(m_fileContext->filePath());
                 if (!f.open(QIODevice::ReadOnly)) {
                     QMessageBox::warning(this, tr("String bytes"), tr("Failed to open file."));
                     return;

@@ -27,8 +27,8 @@ public:
     explicit DisassemblerTab(QWidget *parent, QString path);
     ~DisassemblerTab();
 
-    void saveToFile(QString path) override {}
-    void setTabData(QByteArray &data) override;
+    void saveToFile(QString path) {}
+    void setTabData(QByteArray &data);
 
     struct LineInfo {
         int sectionIndex = -1; // index in m_sections
