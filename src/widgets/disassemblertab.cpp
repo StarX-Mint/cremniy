@@ -24,6 +24,9 @@
 #include <QStandardPaths>
 #include <QTimer>
 
+#include <QGuiApplication>
+#include <QClipboard>
+
 #include "utils/appsettings.h"
 #include "utils/globalwidgetsmanager.h"
 #include "widgets/disasm/disasmtexthighlighter.h"
